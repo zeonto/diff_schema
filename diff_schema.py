@@ -156,7 +156,7 @@ class SchemaObjects(object):
             if column_name:
                 tmp = column_name.group().split(",")
                 _column_content = ",".join(tmp[:-1])
-                return_definitions['column'][column_name.group(2)] = _column_content
+                return_definitions['column'][column_name.group(2)] = _column_content.strip()
 
             primary_name = re.match(r"(\s*PRIMARY KEY\s*)", definition)
             if primary_name:
@@ -223,6 +223,41 @@ class SchemaAlters(object):
             self._fulltext(table,from_table['fulltext'],to_table['fulltext'])
             self._option(table,from_table['option'],to_table['option'])
             self._record_alters(" ")
+
+    def _get_option_diff(self, source_option, target_option):
+        """
+        @brief      Gets the option difference.
+        
+        @param      self           The object
+        @param      source_option  The source option
+        @param      target_option  The target option
+        
+        @return     The option difference.
+        """
+        check_option = ['ENGINE', 'CHARSET', 'COMMENT'] # 指定检查表设置项
+        sources = source_option.split(' ')
+        targets = target_option.split(' ')
+        _sources = {}
+        _targets = {}
+        for target_item in targets:
+            if target_item:
+                _item = target_item.split('=', 1)
+                if len(_item) == 2 and _item[0] in check_option:
+                    _targets[_item[0]] = _item[1]
+
+        for source_item in sources:
+            if source_item:
+                _item = source_item.split('=', 1)
+                if len(_item) == 2 and _item[0] in check_option:
+                    _sources[_item[0]] = _item[1]
+
+        option_diff = ''
+        for option_member in check_option:
+            if _sources[option_member] == _targets[option_member]:
+                pass
+            else:
+                option_diff += option_member + '=' +  _sources[option_member] + ' '
+        return option_diff.strip()
 
     def _column(self,table,from_column,to_column):
         for definition in from_column:
@@ -331,7 +366,8 @@ class SchemaAlters(object):
                 if from_option['option'] == to_option['option']:
                     pass
                 else:
-                    self._record_alters("alter table `%s` %s;" % (table,to_option['option']))
+                    option_content = self._get_option_diff(to_option['option'],from_option['option'])
+                    self._record_alters("alter table `%s` %s;" % (table,option_content))
 
 
 def main():
@@ -345,6 +381,7 @@ def main():
     definitions_alters = current_alters.get_definitions_alters()
 
     diff_alters = open(opt_main["diff_alters"],'w')
+    diff_alters.write('-- set default character\nset names utf8;\n\n')
     diff_alters.write(objects_alters)
     diff_alters.write(definitions_alters)
     diff_alters.close()
