@@ -253,7 +253,7 @@ class SchemaAlters(object):
 
         option_diff = ''
         for option_member in check_option:
-            if _sources[option_member] == _targets[option_member]:
+            if option_member in _sources.keys() and option_member in _targets.keys() and _sources[option_member] == _targets[option_member]:
                 pass
             else:
                 option_diff += option_member + '=' +  _sources[option_member] + ' '
