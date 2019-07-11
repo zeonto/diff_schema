@@ -1,5 +1,9 @@
 #!/usr/bin/env python
-# -*- coding:utf-8 -*-
+# -*- coding: utf-8 -*-
+# @Author: zeonto
+# @Date:   2019-07-12 02:13:28
+# @Last Modified by:   zeonto
+# @Last Modified time: 2019-07-12 02:15:06
 
 import sys, time, re
 try:
@@ -62,13 +66,13 @@ class SchemaObjects(object):
         self.return_objects['routines'] = {}
         self.return_objects['triggers'] = {}
 
-        self.from_tables = self._get_tables(self.target_schema)
-        self.to_tables = self._get_tables(self.source_schema)
-        self.diff_tables = self._get_diff_tables(self.from_tables,self.to_tables)
+        self.target_tables = self._get_tables(self.target_schema)
+        self.source_tables = self._get_tables(self.source_schema)
+        self.diff_tables = self._get_diff_tables(self.target_tables,self.source_tables)
         for table in self.diff_tables:
             self.return_objects['tables'][table] = {}
-            self.return_objects['tables'][table]['from_table'] = self._get_table_definitions(self.diff_tables[table]['from_table'])
-            self.return_objects['tables'][table]['to_table']   = self._get_table_definitions(self.diff_tables[table]['to_table'])
+            self.return_objects['tables'][table]['target_table'] = self._get_table_definitions(self.diff_tables[table]['target_table'])
+            self.return_objects['tables'][table]['source_table']   = self._get_table_definitions(self.diff_tables[table]['source_table'])
 
     def _record_alters(self,alter):
         self.objects_alters += alter
@@ -113,28 +117,28 @@ class SchemaObjects(object):
 
             return return_tables
 
-    def _get_diff_tables(self,from_tables,to_tables):
+    def _get_diff_tables(self,target_tables,source_tables):
         return_tables = {}
-        if from_tables and to_tables:
-            for table in from_tables:
-                if to_tables.has_key(table):
-                    if from_tables[table] == to_tables[table]:
+        if target_tables and source_tables:
+            for table in target_tables:
+                if source_tables.has_key(table):
+                    if target_tables[table] == source_tables[table]:
                         pass
                     else:
                         return_tables[table] = {}
-                        return_tables[table]['from_table'] = from_tables[table]
-                        return_tables[table]['to_table'] = to_tables[table]
+                        return_tables[table]['target_table'] = target_tables[table]
+                        return_tables[table]['source_table'] = source_tables[table]
                 else:
                      self._record_alters("-- %s" % (table))
                      self._record_alters("drop table %s;" % (table))
                      self._record_alters(" ")
 
-            for table in to_tables:
-                if from_tables.has_key(table):
+            for table in source_tables:
+                if target_tables.has_key(table):
                     pass
                 else:
                     self._record_alters("-- %s" % (table))
-                    self._record_alters("%s" % (to_tables[table]))
+                    self._record_alters("%s" % (source_tables[table]))
                     self._record_alters(" ")
 
         return return_tables
@@ -148,6 +152,7 @@ class SchemaObjects(object):
         return_definitions['foreign'] = {}
         return_definitions['fulltext'] = {}
         return_definitions['option'] = {}
+        return_definitions['column_position'] = {}
 
         table_definitions = schema_table.split('\n')
 
@@ -157,6 +162,7 @@ class SchemaObjects(object):
                 tmp = column_name.group().split(",")
                 _column_content = ",".join(tmp[:-1])
                 return_definitions['column'][column_name.group(2)] = _column_content.strip()
+                return_definitions['column_position'][column_name.group(2)] = table_definitions.index(definition)
 
             primary_name = re.match(r"(\s*PRIMARY KEY\s*)", definition)
             if primary_name:
@@ -212,21 +218,21 @@ class SchemaAlters(object):
     def _alter_tables(self,schema_tables):
         for table in schema_tables:
             self._record_alters("-- %s" % (table))
-            from_table = schema_tables[table]['from_table']
-            to_table = schema_tables[table]['to_table']
+            target_table = schema_tables[table]['target_table']
+            source_table = schema_tables[table]['source_table']
 
-            self._column(table,from_table['column'],to_table['column'])
-            self._primary(table,from_table['primary'],to_table['primary'])
-            self._unique(table,from_table['unique'],to_table['unique'])
-            self._key(table,from_table['key'],to_table['key'])
-            self._foreign(table,from_table['foreign'],to_table['foreign'])
-            self._fulltext(table,from_table['fulltext'],to_table['fulltext'])
-            self._option(table,from_table['option'],to_table['option'])
+            self._column(table,target_table['column'],source_table['column'])
+            self._primary(table,target_table['primary'],source_table['primary'])
+            self._unique(table,target_table['unique'],source_table['unique'])
+            self._key(table,target_table['key'],source_table['key'])
+            self._foreign(table,target_table['foreign'],source_table['foreign'])
+            self._fulltext(table,target_table['fulltext'],source_table['fulltext'])
+            self._option(table,target_table['option'],source_table['option'])
             self._record_alters(" ")
 
     def _get_option_diff(self, source_option, target_option):
         """
-        @brief      Gets the option difference.
+        @brief      获取表设置差异
         
         @param      self           The object
         @param      source_option  The source option
@@ -259,21 +265,192 @@ class SchemaAlters(object):
                 option_diff += option_member + '=' +  _sources[option_member] + ' '
         return option_diff.strip()
 
-    def _column(self,table,from_column,to_column):
-        for definition in from_column:
-            if to_column.has_key(definition):
-                if from_column[definition] == to_column[definition]:
+    def _get_column_position_num(self,column_position,column):
+        """
+        @brief      获取字段所在位置（数字）
+        
+        @param      self             The object
+        @param      column_position  The column position
+        @param      column           The column
+        
+        @return     The column position number.
+        """
+        if (column_position[column]):
+            return column_position[column]
+        return 0
+
+    def _get_next_column(self,position_dict,column):
+        """
+        @brief      获取下一个字段
+        
+        @param      self           The object
+        @param      position_dict  The position dictionary
+        @param      column         The column
+        
+        @return     The next column.
+        """
+        if position_dict[column] == len(position_dict):
+            # 最后一个字段没有下一个字段，返回空
+            return ''
+        next_position = position_dict[column] + 1
+        next_column = list(position_dict.keys())[list(position_dict.values()).index(next_position)]
+        return next_column
+
+    def _get_before_column(self,position_dict,column):
+        """
+        @brief      获取上一个字段
+        
+        @param      self           The object
+        @param      position_dict  The position dictionary
+        @param      column         The column
+        
+        @return     The before column.
+        """
+        if position_dict[column] == 1:
+            # 第1个字段前面没有字段
+            return ''
+        before_position = position_dict[column] - 1
+        before_column = list(position_dict.keys())[list(position_dict.values()).index(before_position)]
+        return before_column
+
+    def _get_target_next_column(self,source_position_dict,target_position_dict,column):
+        """
+        @brief      获取目标结构中的下一个字段
+        
+        @param      self                  The object
+        @param      source_position_dict  The source position dictionary
+        @param      target_position_dict  The target position dictionary
+        @param      column                The column
+        
+        @return     The target next column.
+        """
+        source_position = source_position_dict[column];
+        if source_position < len(source_position_dict):
+            for x in xrange(source_position+1,len(source_position_dict)+1):
+                next_column = list(source_position_dict.keys())[list(source_position_dict.values()).index(x)]
+                if target_position_dict.has_key(next_column):
+                    return next_column
+        return ''
+
+    def _get_source_before_column(self,source_position_dict,target_position_dict,column):
+        """
+        @brief      从源结构中获取前面一个字段
+        
+        @param      self                  The object
+        @param      source_position_dict  The source position dictionary
+        @param      target_position_dict  The target position dictionary
+        @param      column                The column
+        
+        @return     The source before column.
+        """
+        source_position = source_position_dict[column];
+        # 从第1个参数开始，到第2个参数之前结束
+        # 按位置从后往前查，字段前面一个字段存在目标结构中，则返回该字段
+        for x in xrange(source_position-1,0,-1):
+            before_column = list(source_position_dict.keys())[list(source_position_dict.values()).index(x)]
+            return before_column
+        return ''
+
+    def _get_target_before_column(self,source_position_dict,target_position_dict,column):
+        """
+        @brief      从目标结构获取前面一个字段
+        
+        @param      self                  The object
+        @param      source_position_dict  The source position dictionary
+        @param      target_position_dict  The target position dictionary
+        @param      column                The column
+        
+        @return     The target before column.
+        """
+        source_position = source_position_dict[column];
+        # 从第1个参数开始，到第2个参数之前结束
+        # 按位置从后往前查，字段前面一个字段存在目标结构中，则返回该字段
+        for x in xrange(source_position-1,0,-1):
+            before_column = list(source_position_dict.keys())[list(source_position_dict.values()).index(x)]
+            if target_position_dict.has_key(before_column):
+                return before_column
+        return ''
+
+    def _get_column_position_sql(self,source_position_dict,target_position_dict,column):
+        """
+        @brief      获取字段所在位置关系
+        
+        @param      self                  The object
+        @param      source_position_dict  The source position dictionary {'status': 5, 'id': 1}
+        @param      target_position_dict  The target position dictionary
+        @param      column                The column
+        
+        @return     The column position sql.
+        """
+        # if (source_position_dict[column] and target_position_dict[column]):
+        if (source_position_dict.has_key(column) and target_position_dict.has_key(column)):
+            if (source_position_dict[column] == target_position_dict[column]):
+                return ''
+            else:
+                current_postion = source_position_dict[column]
+                if current_postion == 1:
+                    # 假如是第一个字段
+                    return ' FIRST'
+                before_column = self._get_target_before_column(source_position_dict, target_position_dict, column)
+                if before_column:
+                        return " AFTER `%s`" % (before_column)
+                # if current_postion > 1:
+                #     # 取出当前字段的上一个字段位置，然后用位置获取对应的字段名
+                #     before_position = current_postion - 1
+                #     before_column = list(source_position_dict.keys())[list(source_position_dict.values()).index(before_position)]
+                #     if before_column:
+                #         return " AFTER `%s`" % (before_column)
+                #     else:
+                #         return ''
+                # else:
+                #     return ' FIRST '
+                #     next_position = current_postion + 1
+                #     next_column = list(source_position_dict.keys())[list(source_position_dict.values()).index(next_position)]
+                #     if next_column:
+                #         return " BEFORE `%s`" % (next_column)
+                #     else:
+                #         return ''
+        return ''
+
+    def _column(self,table,target_column,source_column):
+        source_position_dict = self.diff_objects['tables'][table]['source_table']['column_position']
+        target_position_dict = self.diff_objects['tables'][table]['target_table']['column_position']
+
+        colimn_sql = "ALTER TABLE `%s`\n" % (table)
+        for definition in target_column:
+            if source_column.has_key(definition):
+                source_position = self._get_column_position_num(source_position_dict, definition)
+                target_position = self._get_column_position_num(target_position_dict, definition)
+                if source_position == target_position and target_column[definition] == source_column[definition]:
+                    # 字段内容、字段位置一致，没变化跳过
                     pass
                 else:
-                    self._record_alters("alter table `%s` modify column %s;" % (table,to_column[definition]))
+                    # 字段内容没变化，字段位置改变
+                    source_before_column = self._get_before_column(source_position_dict, definition)
+                    target_before_column = self._get_before_column(target_position_dict, definition)
+                    if target_column[definition] == source_column[definition] and source_before_column == target_before_column:
+                        # 字段内容没变化，上一个字段也相同，跳过
+                        pass
+                    else:
+                        source_next_column = self._get_next_column(source_position_dict, definition)
+                        target_next_column = self._get_next_column(target_position_dict, definition)
+                        if target_column[definition] == source_column[definition] and source_next_column == target_next_column:
+                            # 字段内容没变化，下一个字段也相同，跳过
+                            pass
+                        else:
+                            column_position = self._get_column_position_sql(source_position_dict, target_position_dict, definition)
+                            colimn_sql += "\tMODIFY COLUMN %s,\n" % (source_column[definition] + column_position) 
             else:
-                self._record_alters("alter table `%s` drop column `%s`;" % (table,definition))
+                colimn_sql += ("\tDROP COLUMN `%s`,\n" % (definition))
 
-        for definition in to_column:
-            if from_column.has_key(definition):
+        for definition in source_column:
+            if target_column.has_key(definition):
                 pass
             else:
-                self._record_alters("alter table `%s` add column %s;" % (table,to_column[definition]))
+                target_before_column = self._get_target_before_column(source_position_dict, target_position_dict, definition)
+                colimn_sql += ("\tADD COLUMN %s AFTER %s,\n" % (source_column[definition],target_before_column))
+        # 同表字段操作拼接一条语句
+        self._record_alters(colimn_sql.strip('\n').strip(',') + ';')
 
     def _primary(self,table,from_primary,to_primary):
         if from_primary.has_key('primary'):
@@ -310,21 +487,24 @@ class SchemaAlters(object):
                 self._record_alters("alter table `%s` add %s;" % (table,to_unique[definition]))
 
     def _key(self,table,from_key,to_key):
+        _sql = "ALTER TABLE `%s`\n" % (table)
         for definition in from_key:
             if to_key.has_key(definition):
                 if from_key[definition] == to_key[definition]:
                     pass
                 else:
-                    self._record_alters("alter table `%s` drop key %s;" % (table,definition))
-                    self._record_alters("alter table `%s` add %s;" % (table,to_key[definition]))
+                    _sql += "\tDROP KEY %s,\n" % (definition)
+                    _sql += "\tADD %s,\n" % (to_key[definition])
             else:
-                self._record_alters("alter table `%s` drop key %s;" % (table,definition))
+                _sql += "\tDROP KEY %s,\n" % (definition)
 
         for definition in to_key:
             if from_key.has_key(definition):
                 pass
             else:
-                self._record_alters("alter table `%s` add %s;" % (table,to_key[definition]))
+                _sql += "\tADD %s,\n" % (to_key[definition])
+
+        self._record_alters(_sql.strip('\n').strip(',') + ';')
 
     def _foreign(self,table,from_foreign,to_foreign):
         for definition in from_foreign:
@@ -367,7 +547,7 @@ class SchemaAlters(object):
                     pass
                 else:
                     option_content = self._get_option_diff(to_option['option'],from_option['option'])
-                    self._record_alters("alter table `%s` %s;" % (table,option_content))
+                    self._record_alters("ALTER TABLE `%s` %s;" % (table,option_content))
 
 
 def main():
