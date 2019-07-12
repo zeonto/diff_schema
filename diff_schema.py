@@ -3,7 +3,7 @@
 # @Author: zeonto
 # @Date:   2019-07-12 02:13:28
 # @Last Modified by:   zeonto
-# @Last Modified time: 2019-07-12 02:15:06
+# @Last Modified time: 2019-07-12 20:15:20
 
 import sys, time, re
 try:
@@ -109,9 +109,9 @@ class SchemaObjects(object):
                 schema_string = schema_string + line
             schema_file.close()
             return_tables = {}
-            tables = re.findall(r"CREATE TABLE[^;]*;", schema_string)
+            tables = re.findall(r"CREATE\s*TABLE[^;]*;", schema_string)
             for table in tables:
-                table_name = re.match(r"(CREATE TABLE \`)(.*)(\` \()", table)
+                table_name = re.match(r"(CREATE\s*TABLE\s*\`)(.*)(\`\s*\()", table)
                 if table_name:
                     return_tables[table_name.group(2)] = table
 
