@@ -416,7 +416,8 @@ class SchemaAlters(object):
         source_position_dict = self.diff_objects['tables'][table]['source_table']['column_position']
         target_position_dict = self.diff_objects['tables'][table]['target_table']['column_position']
 
-        colimn_sql = "ALTER TABLE `%s`\n" % (table)
+        _alter = "ALTER TABLE `%s`\n" % (table)
+        _sql = ''
         for definition in target_column:
             if source_column.has_key(definition):
                 source_position = self._get_column_position_num(source_position_dict, definition)
@@ -439,18 +440,19 @@ class SchemaAlters(object):
                             pass
                         else:
                             column_position = self._get_column_position_sql(source_position_dict, target_position_dict, definition)
-                            colimn_sql += "\tMODIFY COLUMN %s,\n" % (source_column[definition] + column_position) 
+                            _sql += "\tMODIFY COLUMN %s,\n" % (source_column[definition] + column_position) 
             else:
-                colimn_sql += ("\tDROP COLUMN `%s`,\n" % (definition))
+                _sql += ("\tDROP COLUMN `%s`,\n" % (definition))
 
         for definition in source_column:
             if target_column.has_key(definition):
                 pass
             else:
                 target_before_column = self._get_target_before_column(source_position_dict, target_position_dict, definition)
-                colimn_sql += ("\tADD COLUMN %s AFTER %s,\n" % (source_column[definition],target_before_column))
+                _sql += ("\tADD COLUMN %s AFTER %s,\n" % (source_column[definition],target_before_column))
         # 同表字段操作拼接一条语句
-        self._record_alters(colimn_sql.strip('\n').strip(',') + ';')
+        if _sql:
+            self._record_alters(_alter + _sql.strip('\n').strip(',') + ';')
 
     def _primary(self,table,from_primary,to_primary):
         if from_primary.has_key('primary'):
@@ -487,7 +489,8 @@ class SchemaAlters(object):
                 self._record_alters("alter table `%s` add %s;" % (table,to_unique[definition]))
 
     def _key(self,table,from_key,to_key):
-        _sql = "ALTER TABLE `%s`\n" % (table)
+        _alter = "ALTER TABLE `%s`\n" % (table)
+        _sql = ''
         for definition in from_key:
             if to_key.has_key(definition):
                 if from_key[definition] == to_key[definition]:
@@ -504,7 +507,8 @@ class SchemaAlters(object):
             else:
                 _sql += "\tADD %s,\n" % (to_key[definition])
 
-        self._record_alters(_sql.strip('\n').strip(',') + ';')
+        if _sql:
+            self._record_alters(_alter + _sql.strip('\n').strip(',') + ';')
 
     def _foreign(self,table,from_foreign,to_foreign):
         for definition in from_foreign:
