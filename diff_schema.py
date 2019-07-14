@@ -3,7 +3,7 @@
 # @Author: zeonto
 # @Date:   2019-07-12 02:13:28
 # @Last Modified by:   zeonto
-# @Last Modified time: 2019-07-12 20:15:20
+# @Last Modified time: 2019-07-14 23:51:41
 
 import sys, time, re
 try:
@@ -28,8 +28,8 @@ which is:
 """ % (sys.exc_value, sys.version)
         sys.exit(1)
 
-__prog__= "merge_schema"
-__version__="0.1-beta"
+__prog__= "diff_schema"
+__version__="1.0"
 
 
 def config_option():
@@ -217,18 +217,20 @@ class SchemaAlters(object):
 
     def _alter_tables(self,schema_tables):
         for table in schema_tables:
-            self._record_alters("-- %s" % (table))
             target_table = schema_tables[table]['target_table']
             source_table = schema_tables[table]['source_table']
 
-            self._column(table,target_table['column'],source_table['column'])
-            self._primary(table,target_table['primary'],source_table['primary'])
-            self._unique(table,target_table['unique'],source_table['unique'])
-            self._key(table,target_table['key'],source_table['key'])
-            self._foreign(table,target_table['foreign'],source_table['foreign'])
-            self._fulltext(table,target_table['fulltext'],source_table['fulltext'])
-            self._option(table,target_table['option'],source_table['option'])
-            self._record_alters(" ")
+            _alter = ''
+            _alter += self._column(table,target_table['column'],source_table['column'])
+            _alter += self._primary(table,target_table['primary'],source_table['primary'])
+            _alter += self._unique(table,target_table['unique'],source_table['unique'])
+            _alter += self._key(table,target_table['key'],source_table['key'])
+            _alter += self._foreign(table,target_table['foreign'],source_table['foreign'])
+            _alter += self._fulltext(table,target_table['fulltext'],source_table['fulltext'])
+            _alter += self._option(table,target_table['option'],source_table['option'])
+            if _alter:
+                self._record_alters("-- %s" % (table))
+                self._record_alters(_alter)
 
     def _get_option_diff(self, source_option, target_option):
         """
@@ -243,6 +245,10 @@ class SchemaAlters(object):
         check_option = ['ENGINE', 'CHARSET', 'COMMENT'] # 指定检查表设置项
         sources = source_option.split(' ')
         targets = target_option.split(' ')
+
+        pattern = re.compile(r"COMMENT=(.*)")
+        _comment = pattern.findall(source_option)
+
         _sources = {}
         _targets = {}
         for target_item in targets:
@@ -262,7 +268,13 @@ class SchemaAlters(object):
             if option_member in _sources.keys() and option_member in _targets.keys() and _sources[option_member] == _targets[option_member]:
                 pass
             else:
-                option_diff += option_member + '=' +  _sources[option_member] + ' '
+                if option_member == 'COMMENT':
+                    option_diff += option_member + '=' + _comment[0]
+                else:
+                    if option_member not in _sources.keys() and option_member in _targets.keys():
+                        option_diff += option_member + '=\'\''
+                    else:
+                        option_diff += option_member + '=' +  _sources[option_member] + ' '
         return option_diff.strip()
 
     def _get_column_position_num(self,column_position,column):
@@ -394,22 +406,6 @@ class SchemaAlters(object):
                 before_column = self._get_target_before_column(source_position_dict, target_position_dict, column)
                 if before_column:
                         return " AFTER `%s`" % (before_column)
-                # if current_postion > 1:
-                #     # 取出当前字段的上一个字段位置，然后用位置获取对应的字段名
-                #     before_position = current_postion - 1
-                #     before_column = list(source_position_dict.keys())[list(source_position_dict.values()).index(before_position)]
-                #     if before_column:
-                #         return " AFTER `%s`" % (before_column)
-                #     else:
-                #         return ''
-                # else:
-                #     return ' FIRST '
-                #     next_position = current_postion + 1
-                #     next_column = list(source_position_dict.keys())[list(source_position_dict.values()).index(next_position)]
-                #     if next_column:
-                #         return " BEFORE `%s`" % (next_column)
-                #     else:
-                #         return ''
         return ''
 
     def _column(self,table,target_column,source_column):
@@ -450,109 +446,141 @@ class SchemaAlters(object):
             else:
                 target_before_column = self._get_target_before_column(source_position_dict, target_position_dict, definition)
                 _sql += ("\tADD COLUMN %s AFTER %s,\n" % (source_column[definition],target_before_column))
-        # 同表字段操作拼接一条语句
+
         if _sql:
-            self._record_alters(_alter + _sql.strip('\n').strip(',') + ';')
+            return _alter + _sql.strip('\n').strip(',') + ';\n'
+        else:
+            return ''
 
-    def _primary(self,table,from_primary,to_primary):
-        if from_primary.has_key('primary'):
-            if to_primary.has_key('primary'):
-                if from_primary['primary'] == to_primary['primary']:
-                    pass
-                else:
-                    self._record_alters("alter table `%s` drop primary key;" % (table))
-                    self._record_alters("alter table `%s` add %s;" % (table,to_primary['primary']))
-            else:
-                self._record_alters("alter table `%s` drop primary key;" % (table))
-
-        if to_primary.has_key('primary'):
-            if from_primary.has_key('primary'):
-                pass
-            else:
-                self._record_alters("alter table `%s` add %s;" % (table,to_primary['primary']))
-
-    def _unique(self,table,from_unique,to_unique):
-        for definition in from_unique:
-            if to_unique.has_key(definition):
-                if from_unique[definition] == to_unique[definition]:
-                    pass
-                else:
-                    self._record_alters("alter table `%s` drop unique key %s;" % (table,definition))
-                    self._record_alters("alter table `%s` add %s;" % (table,to_unique[definition]))
-            else:
-                self._record_alters("alter table `%s` drop unique key %s;" % (table,definition))
-
-        for definition in to_unique:
-            if from_unique.has_key(definition):
-                pass
-            else:
-                self._record_alters("alter table `%s` add %s;" % (table,to_unique[definition]))
-
-    def _key(self,table,from_key,to_key):
+    def _primary(self,table,target_primary,source_primary):
         _alter = "ALTER TABLE `%s`\n" % (table)
         _sql = ''
-        for definition in from_key:
-            if to_key.has_key(definition):
-                if from_key[definition] == to_key[definition]:
+        if target_primary.has_key('primary'):
+            if source_primary.has_key('primary'):
+                if target_primary['primary'] == source_primary['primary']:
+                    pass
+                else:
+                    _sql += ("\tDROP PRIMARY KEY,\n")
+                    _sql += ("\tADD %s,\n" % (source_primary['primary']))
+            else:
+                _sql += ("\tDROP PRIMARY KEY,\n")
+
+        if source_primary.has_key('primary'):
+            if target_primary.has_key('primary'):
+                pass
+            else:
+                _sql += ("\tADD %s,\n" % (source_primary['primary']))
+
+        if _sql:
+            return _alter + _sql.strip('\n').strip(',') + ';\n'
+        else:
+            return ''
+
+    def _unique(self,table,target_unique,source_unique):
+        _alter = "ALTER TABLE `%s`\n" % (table)
+        _sql = ''
+        for definition in target_unique:
+            if source_unique.has_key(definition):
+                if target_unique[definition] == source_unique[definition]:
+                    pass
+                else:
+                    _sql += "\tDROP UNIQUE KEY %s,\n" % (definition)
+                    _sql += "\tADD %s,\n" % (source_unique[definition])
+            else:
+                _sql += "\tDROP UNIQUE KEY %s,\n" % (definition)
+
+        for definition in source_unique:
+            if target_unique.has_key(definition):
+                pass
+            else:
+                _sql += "\tADD %s,\n" % (source_unique[definition])
+
+        if _sql:
+            return _alter + _sql.strip('\n').strip(',') + ';\n'
+        else:
+            return ''
+
+    def _key(self,table,target_key,source_key):
+        _alter = "ALTER TABLE `%s`\n" % (table)
+        _sql = ''
+        for definition in target_key:
+            if source_key.has_key(definition):
+                if target_key[definition] == source_key[definition]:
                     pass
                 else:
                     _sql += "\tDROP KEY %s,\n" % (definition)
-                    _sql += "\tADD %s,\n" % (to_key[definition])
+                    _sql += "\tADD %s,\n" % (source_key[definition])
             else:
                 _sql += "\tDROP KEY %s,\n" % (definition)
 
-        for definition in to_key:
-            if from_key.has_key(definition):
+        for definition in source_key:
+            if target_key.has_key(definition):
                 pass
             else:
-                _sql += "\tADD %s,\n" % (to_key[definition])
+                _sql += "\tADD %s,\n" % (source_key[definition])
 
         if _sql:
-            self._record_alters(_alter + _sql.strip('\n').strip(',') + ';')
+            return _alter + _sql.strip('\n').strip(',') + ';\n'
+        else:
+            return ''
 
-    def _foreign(self,table,from_foreign,to_foreign):
-        for definition in from_foreign:
-            if to_foreign.has_key(definition):
-                if from_foreign[definition] == to_foreign[definition]:
+    def _foreign(self,table,target_foreign,source_foreign):
+        _alter = "ALTER TABLE `%s`\n" % (table)
+        _sql = ''
+        for definition in target_foreign:
+            if source_foreign.has_key(definition):
+                if target_foreign[definition] == source_foreign[definition]:
                     pass
                 else:
-                    self._record_alters("alter table `%s` drop foreign key `%s`;" % (table,definition))
-                    self._record_alters("alter table `%s` add %s;" % (table,to_foreign[definition]))
+                    _sql += "\tDROP FOREIGN KEY %s,\n" % (definition)
+                    _sql += "\tADD %s,\n" % (source_foreign[definition])
             else:
-                self._record_alters("alter table `%s` drop foreign key `%s`;" % (table,definition))
+                _sql += "\tDROP FOREIGN KEY %s,\n" % (definition)
 
-        for definition in to_foreign:
-            if from_foreign.has_key(definition):
+        for definition in source_foreign:
+            if target_foreign.has_key(definition):
                 pass
             else:
-                self._record_alters("alter table `%s` add %s;" % (table,to_foreign[definition]))
+                _sql += "\tADD %s,\n" % (source_foreign[definition])
 
-    def _fulltext(self,table,from_fulltext,to_fulltext):
-        for definition in from_fulltext:
-            if to_fulltext.has_key(definition):
-                if from_fulltext[definition] == to_fulltext[definition]:
+        if _sql:
+            return _alter + _sql.strip('\n').strip(',') + ';\n'
+        else:
+            return ''
+
+    def _fulltext(self,table,target_fulltext,source_fulltext):
+        _alter = "ALTER TABLE `%s`\n" % (table)
+        _sql = ''
+        for definition in target_fulltext:
+            if source_fulltext.has_key(definition):
+                if target_fulltext[definition] == source_fulltext[definition]:
                     pass
                 else:
-                    self._record_alters("alter table `%s` drop fulltext key `%s`;" % (table,definition))
-                    self._record_alters("alter table `%s` add %s;" % (table,to_fulltext[definition]))
+                    _sql += "\tDROP FULLTEXT KEY %s,\n" % (definition)
+                    _sql += "\tADD %s,\n" % (source_fulltext[definition])
             else:
-                self._record_alters("alter table `%s` drop fulltext key `%s`;" % (table,definition))
+                _sql += "\tDROP FULLTEXT KEY %s,\n" % (definition)
 
-        for definition in to_fulltext:
-            if from_fulltext.has_key(definition):
+        for definition in source_fulltext:
+            if target_fulltext.has_key(definition):
                 pass
             else:
-                self._record_alters("alter table `%s` add %s;" % (table,to_fulltext[definition]))
+                _sql += "\tADD %s,\n" % (source_fulltext[definition])
 
-    def _option(self,table,from_option,to_option):
-        if from_option.has_key('option'):
-            if to_option.has_key('option'):
-                if from_option['option'] == to_option['option']:
+        if _sql:
+            return _alter + _sql.strip('\n').strip(',') + ';\n'
+        else:
+            return ''
+
+    def _option(self,table,target_option,source_option):
+        if target_option.has_key('option'):
+            if source_option.has_key('option'):
+                if target_option['option'] == source_option['option']:
                     pass
                 else:
-                    option_content = self._get_option_diff(to_option['option'],from_option['option'])
-                    self._record_alters("ALTER TABLE `%s` %s;" % (table,option_content))
-
+                    option_content = self._get_option_diff(source_option['option'],target_option['option'])
+                    return "ALTER TABLE `%s` %s;" % (table,option_content)
+        return ''
 
 def main():
     config_option()
