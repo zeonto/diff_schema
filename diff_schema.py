@@ -3,9 +3,10 @@
 # @Author: zeonto
 # @Date:   2019-07-12 02:13:28
 # @Last Modified by:   zeonto
-# @Last Modified time: 2019-07-14 23:51:41
+# @Last Modified time: 2019-07-17 00:28:20
 
 import sys, time, re
+import mysql.connector
 try:
         from optparse import OptionParser
         import os
@@ -29,24 +30,27 @@ which is:
         sys.exit(1)
 
 __prog__= "diff_schema"
-__version__="1.0"
-
+__version__="1.1.0"
 
 def config_option():
     usage =  "%prog [options] arg \n"
-    usage += " 示例: %prog -s source_schema.sql -t target_schema.sql -o diff_schema.sql"
-    parser = OptionParser(usage)
-    parser.add_option("-t","--target",dest="target_schema",help="from database schema file")
-    parser.add_option("-s","--source",dest="source_schema",help="to database schema file")
-    parser.add_option("-o","--out",dest="diff_alters",help="output diff alters")
+    usage += " Demo1: %prog -d file -s source_schema.sql -t target_schema.sql -o diff_schema.sql\n Demo2: %prog -d db -s root:root@127.0.0.1:3306~dbname1 -t root:root@127.0.0.1:3306~dbname2 -o diff.sql"
+    parser = OptionParser(usage, version=__version__)
+    parser.add_option("-d","--data",dest="data",help="data sources can be a file or db")
+    parser.add_option("-s","--source",dest="source_schema",help="source database schema can be a sql file or a database")
+    parser.add_option("-t","--target",dest="target_schema",help="target database schema can be a sql file or a database")
+    parser.add_option("-o","--output",dest="diff_alters",help="output diff alters to sql file")
 
     (options, args) = parser.parse_args()
 
-    if not options.target_schema or not options.source_schema or not options.diff_alters:
-        parser.error("必须输入参数：-s、-t、-o");
+    if not options.data or not options.target_schema or not options.source_schema or not options.diff_alters:
+        parser.error("必须输入参数：-d -t -s -o");
+    if options.data and options.data not in ['file','db']:
+        parser.error('Incorrect data source type.')
 
     global opt_main
     opt_main = {}
+    opt_main["data_source"] = options.data
     opt_main["target_schema"] = options.target_schema
     opt_main["source_schema"] = options.source_schema
     opt_main["diff_alters"] = options.diff_alters
@@ -66,8 +70,13 @@ class SchemaObjects(object):
         self.return_objects['routines'] = {}
         self.return_objects['triggers'] = {}
 
-        self.target_tables = self._get_tables(self.target_schema)
-        self.source_tables = self._get_tables(self.source_schema)
+        if opt_main['data_source'] == 'db':
+            self.source_tables = self._get_database_tables(self.source_schema)
+            self.target_tables = self._get_database_tables(self.target_schema)
+        else:
+            self.source_tables = self._get_sql_tables(self.source_schema)
+            self.target_tables = self._get_sql_tables(self.target_schema)
+
         self.diff_tables = self._get_diff_tables(self.target_tables,self.source_tables)
         for table in self.diff_tables:
             self.return_objects['tables'][table] = {}
@@ -97,7 +106,15 @@ class SchemaObjects(object):
     def _get_triggers(self,schema_name):
         pass
 
-    def _get_tables(self,schema_name):
+    def _get_sql_tables(self,schema_name):
+        """
+        @brief      Gets the sql tables.
+        
+        @param      self         The object
+        @param      schema_name  The schema name
+        
+        @return     The sql tables.
+        """
         try:
             schema_file = open(schema_name, 'r')
         except IOError:
@@ -117,6 +134,57 @@ class SchemaObjects(object):
 
             return return_tables
 
+    def _get_database_tables(self, conn_config):
+        """
+        @brief      Gets the database tables.
+        
+        @param      self         The object
+        @param      conn_config  The connection configuration
+        
+        @return     The database tables.
+        """
+        config = re.match(r"([^:]*):([^@]*)@(\d+\.\d+\.\d+.\d+):(\d+)~([^~]*)", conn_config)
+        if not config:
+            raise Exception('parameter errors: %s' % (conn_config))
+        db_info = {}
+        if config.group(1):
+            db_info['user'] = config.group(1)
+        else:
+            raise Exception('parameter errors: %s' % (conn_config))
+        if config.group(2):
+            db_info['pass'] = config.group(2)
+        else:
+            db_info['pass'] = ''
+        if config.group(3):
+            db_info['host'] = config.group(3)
+        if config.group(4):
+            db_info['port'] = config.group(4)
+        else:
+            db_info['port'] = 3306
+        if config.group(5):
+            db_info['db'] = config.group(5)
+        else:
+            raise Exception('parameter errors: %s' % (conn_config))
+
+        conn = mysql.connector.connect(
+            host=db_info['host'],
+            user=db_info['user'],
+            password=db_info['pass'],
+            database=db_info['db'],
+            port=db_info['port'],
+            charset='utf8'
+        )
+        cmd = conn.cursor()
+        cmd.execute("show tables")
+        tables = cmd.fetchall()
+        table_schema = {}
+        for table_name in tables:
+            cmd.execute("show create table `%s`;" % (table_name))
+            show_create = cmd.fetchone()
+            table_schema[show_create[0]] = show_create[1]
+
+        return table_schema
+
     def _get_diff_tables(self,target_tables,source_tables):
         return_tables = {}
         if target_tables and source_tables:
@@ -130,7 +198,7 @@ class SchemaObjects(object):
                         return_tables[table]['source_table'] = source_tables[table]
                 else:
                      self._record_alters("-- %s" % (table))
-                     self._record_alters("drop table %s;" % (table))
+                     self._record_alters("DROP TABLE `%s`;" % (table))
                      self._record_alters(" ")
 
             for table in source_tables:
@@ -138,7 +206,7 @@ class SchemaObjects(object):
                     pass
                 else:
                     self._record_alters("-- %s" % (table))
-                    self._record_alters("%s" % (source_tables[table]))
+                    self._record_alters("%s;" % (source_tables[table].strip(';')))
                     self._record_alters(" ")
 
         return return_tables
@@ -187,7 +255,7 @@ class SchemaObjects(object):
             option_name = re.match(r"(\)\s*ENGINE=.*)", definition)
             if option_name:
                 pattern = re.compile(r' AUTO_INCREMENT=\d+| ROW_FORMAT=\w+', re.I)
-                engine_content = re.sub(pattern, '', re.match(r"(\)\s*)(ENGINE[^;]*)(;?)", definition).group(2))
+                engine_content = re.sub(pattern, '', re.match(r"(\)\s*)(ENGINE[^\n]*)(;?)", definition).group(2))
                 return_definitions['option']['option'] = engine_content
 
         return return_definitions
@@ -243,11 +311,15 @@ class SchemaAlters(object):
         @return     The option difference.
         """
         check_option = ['ENGINE', 'CHARSET', 'COMMENT'] # 指定检查表设置项
-        sources = source_option.split(' ')
-        targets = target_option.split(' ')
+        sources = source_option.strip(';').split(' ')
+        targets = target_option.strip(';').split(' ')
 
         pattern = re.compile(r"COMMENT=(.*)")
-        _comment = pattern.findall(source_option)
+        find_comment = pattern.findall(source_option)
+        if find_comment:
+            _comment = find_comment[0].strip(';')
+        else:
+            _comment = '\'\''
 
         _sources = {}
         _targets = {}
@@ -269,12 +341,13 @@ class SchemaAlters(object):
                 pass
             else:
                 if option_member == 'COMMENT':
-                    option_diff += option_member + '=' + _comment[0]
+                    option_diff += option_member + '=' + _comment
                 else:
                     if option_member not in _sources.keys() and option_member in _targets.keys():
                         option_diff += option_member + '=\'\''
                     else:
                         option_diff += option_member + '=' +  _sources[option_member] + ' '
+
         return option_diff.strip()
 
     def _get_column_position_num(self,column_position,column):
@@ -594,8 +667,12 @@ def main():
 
     diff_alters = open(opt_main["diff_alters"],'w')
     diff_alters.write('-- set default character\nset names utf8;\n\n')
-    diff_alters.write(objects_alters)
-    diff_alters.write(definitions_alters)
+    if type(objects_alters).__name__ == 'unicode':
+        diff_alters.write(objects_alters.encode('utf8'))
+        diff_alters.write(definitions_alters.encode('utf8'))
+    else:
+        diff_alters.write(objects_alters)
+        diff_alters.write(definitions_alters)
     diff_alters.close()
 
 if __name__ == "__main__":
