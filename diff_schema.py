@@ -3,7 +3,7 @@
 # @Author: zeonto
 # @Date:   2019-07-12 02:13:28
 # @Last Modified by:   zeonto
-# @Last Modified time: 2019-07-17 00:28:20
+# @Last Modified time: 2019-07-18 21:05:30
 
 import sys, time, re
 import mysql.connector
@@ -143,7 +143,7 @@ class SchemaObjects(object):
         
         @return     The database tables.
         """
-        config = re.match(r"([^:]*):([^@]*)@(\d+\.\d+\.\d+.\d+):(\d+)~([^~]*)", conn_config)
+        config = re.match(r"([^:]*):(.*)@(.*)~([^~]*)", conn_config) # format -> root:root@127.0.0.1:3306~db1
         if not config:
             raise Exception('parameter errors: %s' % (conn_config))
         db_info = {}
@@ -155,14 +155,17 @@ class SchemaObjects(object):
             db_info['pass'] = config.group(2)
         else:
             db_info['pass'] = ''
-        if config.group(3):
-            db_info['host'] = config.group(3)
-        if config.group(4):
-            db_info['port'] = config.group(4)
+        host_info = config.group(3)
+        host_re = re.match(r"([^:]*)(.*)", host_info)
+        host = host_re.group(1)
+        port = host_re.group(2).strip(':')
+        db_info['host'] = host
+        if port:
+            db_info['port'] = port
         else:
             db_info['port'] = 3306
-        if config.group(5):
-            db_info['db'] = config.group(5)
+        if config.group(4):
+            db_info['db'] = config.group(4)
         else:
             raise Exception('parameter errors: %s' % (conn_config))
 
@@ -298,7 +301,7 @@ class SchemaAlters(object):
             _alter += self._option(table,target_table['option'],source_table['option'])
             if _alter:
                 self._record_alters("-- %s" % (table))
-                self._record_alters(_alter)
+                self._record_alters("%s \n" % (_alter.strip('\n')))
 
     def _get_option_diff(self, source_option, target_option):
         """
@@ -667,11 +670,14 @@ def main():
 
     diff_alters = open(opt_main["diff_alters"],'w')
     diff_alters.write('-- set default character\nset names utf8;\n\n')
-    if type(objects_alters).__name__ == 'unicode':
+    if isinstance(objects_alters,unicode):
         diff_alters.write(objects_alters.encode('utf8'))
-        diff_alters.write(definitions_alters.encode('utf8'))
     else:
         diff_alters.write(objects_alters)
+
+    if isinstance(definitions_alters,unicode):
+        diff_alters.write(definitions_alters.encode('utf8'))
+    else:
         diff_alters.write(definitions_alters)
     diff_alters.close()
 
