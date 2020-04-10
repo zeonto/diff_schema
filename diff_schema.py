@@ -560,10 +560,10 @@ class SchemaAlters(object):
                 if target_unique[definition] == source_unique[definition]:
                     pass
                 else:
-                    _sql += "\tDROP UNIQUE KEY %s,\n" % (definition)
+                    _sql += "\tDROP INDEX %s,\n" % (definition)
                     _sql += "\tADD %s,\n" % (source_unique[definition])
             else:
-                _sql += "\tDROP UNIQUE KEY %s,\n" % (definition)
+                _sql += "\tDROP INDEX %s,\n" % (definition)
 
         for definition in source_unique:
             if target_unique.has_key(definition):
