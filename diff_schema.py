@@ -1,9 +1,17 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# @Author: zeonto
-# @Date:   2019-07-12 02:13:28
-# @Last Modified by:   zeonto
-# @Last Modified time: 2019-07-18 21:05:30
+#
+# @Date          : 2019-07-12
+# @Author        : zeonto
+# @File          : diff_schema.py
+# @Description   : This is a sample description.
+# @Version       : 1.1.1
+# @Last Modified : 2024-07-12 15:59:14
+# @License       : GPL-3.0 License
+# 
+# @ChangeLog:
+# - 2024-07-12 15:56  修复语句注释存在“;”字符导致匹配异常的问题
+#
 
 import sys, time, re
 import mysql.connector
@@ -30,7 +38,7 @@ which is:
         sys.exit(1)
 
 __prog__= "diff_schema"
-__version__="1.1.0"
+__version__="1.1.1"
 
 def config_option():
     usage =  "%prog [options] arg \n"
@@ -126,7 +134,7 @@ class SchemaObjects(object):
                 schema_string = schema_string + line
             schema_file.close()
             return_tables = {}
-            tables = re.findall(r"CREATE\s*TABLE[^;]*;", schema_string)
+            tables = re.findall(r"CREATE\s*TABLE.*\(\s[\s\S]*?\s\).*;", schema_string)
             for table in tables:
                 table_name = re.match(r"(CREATE\s*TABLE\s*\`)(.*)(\`\s*\()", table)
                 if table_name:
